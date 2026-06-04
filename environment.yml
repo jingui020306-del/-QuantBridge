@@ -1,0 +1,25 @@
+name: quantbridge
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy>=1.24
+  - pandas>=2.0
+  - scipy>=1.10
+  - matplotlib>=3.7
+  - seaborn>=0.12
+  - pyyaml>=6.0
+  - pip:
+      - yfinance>=0.2.31
+      - alphalens-reloaded>=0.4.3
+      - pyfolio-reloaded>=0.9.5
+      - quantstats>=0.0.62
+      - streamlit>=1.28
+      - plotly>=5.17
+      - pyarrow>=14.0
+      - loguru>=0.7
+      - rich>=13.5
+      - typer>=0.9
+      - watchdog>=4.0

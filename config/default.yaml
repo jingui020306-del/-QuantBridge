@@ -1,0 +1,95 @@
+# ============================================================
+# QuantBridge 默认配置文件
+# 复制此文件为 custom.yaml，修改后通过 --config custom.yaml 使用
+# ============================================================
+
+general:
+  project_name: "default"
+  output_dir: "outputs"
+  log_level: "INFO"
+
+data:
+  tickers:
+    - AAPL
+    - MSFT
+    - GOOGL
+    - AMZN
+    - META
+    - NVDA
+    - TSLA
+  start_date: "2022-01-01"
+  end_date: "2024-12-31"
+  frequency: "1d"          # 1d / 1h / 30m
+  cache_dir: "outputs/cache"
+  # 可选：从 FinceptTerminal 导出的 CSV 路径读取数据
+  fincept_export_path: null
+
+factors:
+  # FinceptTerminal 脚本目录（复用其技术指标计算）
+  fincept_scripts_dir: "/tmp/FinceptTerminal/fincept-qt/scripts"
+  # 自定义因子列表（为空则用默认技术指标组合）
+  custom_factors: []
+  # 默认因子的计算参数
+  default_params:
+    rsi_window: 14
+    macd_fast: 12
+    macd_slow: 26
+    macd_signal: 9
+    ma_windows: [5, 9, 21, 50, 200]
+    volatility_window: 20
+    momentum_windows: [5, 21, 63, 126]
+
+alphalens:
+  forward_periods: [1, 5, 21]  # 未来 1/5/21 天的收益
+  quantiles: 5                  # 分层数量
+  periods_per_year: 252
+  # 通过标准
+  pass_threshold:
+    min_ic_mean: 0.02           # IC 均值绝对值 > 0.02
+    min_icir: 0.3               # ICIR > 0.3
+    min_quantile_spread: 0.005  # 顶底层日均收益差 > 0.5bp
+
+backtest:
+  engine: "lean"                # lean（后续可扩展 vectorbt）
+  lean:
+    docker_image: "quantconnect/lean:latest"
+    # 数据目录挂载
+    data_dir: "outputs/lean_data"
+    # 回测参数
+    start_date: "2022-01-01"
+    end_date: "2024-12-31"
+    cash: 100000                # 初始资金
+    commission: 0.001           # 手续费率
+    slippage: 0.001             # 滑点
+    resolution: "daily"         # daily / minute
+    # 策略类型
+    strategy_type: "ema_cross"  # ema_cross / rsi_reversal / factor_rotation / custom
+    strategy_params:
+      fast_period: 9
+      slow_period: 21
+    # 风控
+    risk:
+      max_position_pct: 0.25
+      stop_loss_pct: 0.05
+      max_daily_loss_pct: 0.03
+
+pyfolio:
+  benchmark: "SPY"
+  periods_per_year: 252
+
+fincept:
+  enabled: true
+  # FinceptTerminal 安装路径
+  fincept_home: "/tmp/FinceptTerminal"
+  # 启动时自动执行的任务
+  on_launch:
+    - refresh_data
+    - compute_factors
+  # 输出给 FinceptTerminal 的信号文件
+  signal_output: "outputs/signals.json"
+  # 输出给 FinceptTerminal 的报告
+  report_output: "outputs/reports"
+
+dashboard:
+  port: 8501
+  auto_open: true
