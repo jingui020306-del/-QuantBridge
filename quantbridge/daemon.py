@@ -37,8 +37,13 @@ class StrategyChangeHandler(FileSystemEventHandler):
             self._trigger_if_cooled(f"检测到策略变更: {event.src_path}")
 
     def on_modified(self, event):
-        if not event.is_directory and self.daemon.is_trigger_file(event.src_path):
-            self._trigger_if_cooled(f"检测到策略更新: {event.src_path}")
+        # Writing a new file often emits created + modified. Responding only to
+        # creation keeps the file contract deterministic and avoids log noise.
+        return
+
+    def on_moved(self, event):
+        if not event.is_directory and self.daemon.is_trigger_file(event.dest_path):
+            self._trigger_if_cooled(f"检测到策略变更: {event.dest_path}")
 
     def _trigger_if_cooled(self, message: str) -> bool:
         now = time.time()

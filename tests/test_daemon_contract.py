@@ -38,3 +38,26 @@ def test_strategy_change_handler_suppresses_cooldown_noise():
     handler._last_run -= handler._cooldown + 0.1
     assert handler._trigger_if_cooled("later edit")
     assert fake.runs == 2
+
+
+def test_strategy_change_handler_ignores_modified_trigger_events():
+    class FakeDaemon:
+        def __init__(self):
+            self.runs = 0
+
+        def is_trigger_file(self, path):
+            return path.endswith("trigger_manual.json")
+
+        def run_cycle(self):
+            self.runs += 1
+
+    class Event:
+        is_directory = False
+        src_path = "outputs/watch/trigger_manual.json"
+
+    fake = FakeDaemon()
+    handler = StrategyChangeHandler(fake)
+
+    handler.on_modified(Event())
+
+    assert fake.runs == 0

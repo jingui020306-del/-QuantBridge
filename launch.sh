@@ -25,6 +25,9 @@ CONDA_ENV="quantbridge"
 FINCEPT_HOME="${FINCEPT_HOME:-}"
 WATCH_DIR="$SCRIPT_DIR/outputs/watch"
 CLEANED_UP=0
+DAEMON_PID=""
+DASHBOARD_PID=""
+FINCEPT_PID=""
 
 # ---- 清理函数 ----
 cleanup() {
@@ -88,6 +91,10 @@ resolve_fincept_exec() {
             "$root/fincept-qt/build/macos-debug/FinceptTerminal.app/Contents/MacOS/FinceptTerminal"
         )
     done
+    FINCEPT_CANDIDATES+=(
+        "$HOME/Applications/FinceptTerminal.app/Contents/MacOS/FinceptTerminal"
+        "/Applications/FinceptTerminal.app/Contents/MacOS/FinceptTerminal"
+    )
 
     for candidate in "${FINCEPT_CANDIDATES[@]}"; do
         if [ -x "$candidate" ]; then
