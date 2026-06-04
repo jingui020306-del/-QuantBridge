@@ -22,11 +22,18 @@ NC='\033[0m' # No Color
 # ---- 路径 ----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONDA_ENV="quantbridge"
-FINCEPT_HOME="${FINCEPT_HOME:-/tmp/FinceptTerminal}"
+FINCEPT_HOME="${FINCEPT_HOME:-}"
 WATCH_DIR="$SCRIPT_DIR/outputs/watch"
+CLEANED_UP=0
 
 # ---- 清理函数 ----
 cleanup() {
+    if [ "$CLEANED_UP" -eq 1 ]; then
+        exit 0
+    fi
+    CLEANED_UP=1
+    trap - SIGINT SIGTERM EXIT
+
     echo ""
     echo -e "${YELLOW}正在关闭 QuantBridge...${NC}"
 
@@ -53,6 +60,44 @@ cleanup() {
 }
 
 trap cleanup SIGINT SIGTERM EXIT
+
+# ---- FinceptTerminal 发现 ----
+resolve_fincept_exec() {
+    if [ -n "${FINCEPT_EXEC:-}" ] && [ -x "$FINCEPT_EXEC" ]; then
+        return 0
+    fi
+
+    FINCEPT_ROOTS=()
+    if [ -n "$FINCEPT_HOME" ]; then
+        FINCEPT_ROOTS+=("$FINCEPT_HOME")
+    fi
+    FINCEPT_ROOTS+=(
+        "$SCRIPT_DIR/../FinceptTerminal"
+        "$SCRIPT_DIR/vendor/FinceptTerminal"
+    )
+
+    FINCEPT_CANDIDATES=()
+    for root in "${FINCEPT_ROOTS[@]}"; do
+        FINCEPT_CANDIDATES+=(
+            "$root/build/fincept"
+            "$root/build/macos-release/FinceptTerminal"
+            "$root/build/macos-debug/FinceptTerminal"
+            "$root/fincept-qt/build/macos-release/FinceptTerminal"
+            "$root/fincept-qt/build/macos-debug/FinceptTerminal"
+            "$root/fincept-qt/build/macos-release/FinceptTerminal.app/Contents/MacOS/FinceptTerminal"
+            "$root/fincept-qt/build/macos-debug/FinceptTerminal.app/Contents/MacOS/FinceptTerminal"
+        )
+    done
+
+    for candidate in "${FINCEPT_CANDIDATES[@]}"; do
+        if [ -x "$candidate" ]; then
+            FINCEPT_EXEC="$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
 
 # ---- 检查 conda ----
 check_conda() {
@@ -112,24 +157,11 @@ echo -e "${GREEN}  打开 http://localhost:8501${NC}"
 sleep 1
 
 # 5. 启动 FinceptTerminal（前台）
-if [ -z "${FINCEPT_EXEC:-}" ]; then
-    FINCEPT_CANDIDATES=(
-        "$FINCEPT_HOME/build/fincept"
-        "$FINCEPT_HOME/build/macos-release/FinceptTerminal"
-        "$FINCEPT_HOME/build/macos-debug/FinceptTerminal"
-        "$FINCEPT_HOME/fincept-qt/build/macos-release/FinceptTerminal"
-        "$FINCEPT_HOME/fincept-qt/build/macos-debug/FinceptTerminal"
-    )
-    for candidate in "${FINCEPT_CANDIDATES[@]}"; do
-        if [ -x "$candidate" ]; then
-            FINCEPT_EXEC="$candidate"
-            break
-        fi
-    done
-fi
+resolve_fincept_exec || true
 
 if [ -x "$FINCEPT_EXEC" ]; then
     echo -e "${YELLOW}启动 FinceptTerminal...${NC}"
+    echo -e "${GREEN}✓ FinceptTerminal: $FINCEPT_EXEC${NC}"
     echo ""
     echo -e "${GREEN}=====================================${NC}"
     echo -e "${GREEN}   QuantBridge 已就绪${NC}"

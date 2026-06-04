@@ -39,8 +39,9 @@ data:
   fincept_export_path: null
 
 factors:
-  # FinceptTerminal 脚本目录（预留集成点；当前默认因子由 QuantBridge 内置计算）
-  fincept_scripts_dir: "/tmp/FinceptTerminal/fincept-qt/scripts"
+  # FinceptTerminal 脚本目录（可选集成点；默认不依赖外部源码树）
+  # 可设置为 "$FINCEPT_HOME/fincept-qt/scripts" 或相对/绝对路径。
+  fincept_scripts_dir: null
   # 自定义因子列表（为空则用默认技术指标组合）
   custom_factors: []
   # 默认因子的计算参数
@@ -54,6 +55,7 @@ factors:
     momentum_windows: [5, 21, 63, 126]
 
 alphalens:
+  use_real: true                # true 时优先尝试 alphalens-reloaded；失败时回落到稳定 lite 检验
   forward_periods: [1, 5, 21]  # 未来 1/5/21 天的收益
   quantiles: 5                  # 分层数量
   periods_per_year: 252
@@ -66,7 +68,9 @@ alphalens:
 backtest:
   engine: "lean"                # 当前 lean 模式会在 Docker 集成不可用时降级为简易回测
   lean:
+    use_docker: false            # true 时尝试 Docker LEAN；默认用稳定 lite 回测保证内部闭环
     docker_image: "quantconnect/lean:latest"
+    timeout_seconds: 600
     # 数据目录挂载
     data_dir: "outputs/lean_data"
     # 回测参数
@@ -88,7 +92,8 @@ backtest:
       max_daily_loss_pct: 0.03
 
 pyfolio:
-  benchmark: "SPY"
+  enable_external_reports: true  # true 时优先尝试 quantstats/pyfolio 生成外部报告
+  benchmark: null                # 可设置为 SPY；默认不联网拉 benchmark
   periods_per_year: 252
 
 fincept:
@@ -96,8 +101,8 @@ fincept:
   # 当前仅支持 file：QuantBridge 写 signals.json / trigger 文件。
   # native 需要在 FinceptTerminal 本体增加读取 signals / 写 trigger 的入口后再启用。
   integration_mode: "file"
-  # FinceptTerminal 安装路径
-  fincept_home: "/tmp/FinceptTerminal"
+  # FinceptTerminal 源码路径，可通过 FINCEPT_HOME 环境变量或自定义配置提供。
+  fincept_home: null
   # 启动时自动执行的任务
   on_launch:
     - refresh_data

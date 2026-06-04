@@ -6,6 +6,7 @@
   - 自定义因子表达式
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,11 @@ class FactorEngine:
         default_params: dict | None = None,
         custom_factors: list[str] | None = None,
     ):
-        self.fincept_scripts_dir = Path(fincept_scripts_dir) if fincept_scripts_dir else None
+        self.fincept_scripts_dir = (
+            Path(os.path.expandvars(fincept_scripts_dir)).expanduser()
+            if fincept_scripts_dir
+            else None
+        )
         self.params = default_params or {}
         self.custom_factors = custom_factors or []
 

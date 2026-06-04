@@ -34,19 +34,20 @@ class StrategyChangeHandler(FileSystemEventHandler):
 
     def on_created(self, event):
         if not event.is_directory and self.daemon.is_trigger_file(event.src_path):
-            logger.info(f"检测到策略变更: {event.src_path}")
-            self._trigger_if_cooled()
+            self._trigger_if_cooled(f"检测到策略变更: {event.src_path}")
 
     def on_modified(self, event):
         if not event.is_directory and self.daemon.is_trigger_file(event.src_path):
-            logger.info(f"检测到策略更新: {event.src_path}")
-            self._trigger_if_cooled()
+            self._trigger_if_cooled(f"检测到策略更新: {event.src_path}")
 
-    def _trigger_if_cooled(self):
+    def _trigger_if_cooled(self, message: str) -> bool:
         now = time.time()
         if now - self._last_run > self._cooldown:
             self._last_run = now
+            logger.info(message)
             self.daemon.run_cycle()
+            return True
+        return False
 
 
 class QuantBridgeDaemon:

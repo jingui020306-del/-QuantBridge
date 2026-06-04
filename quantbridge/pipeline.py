@@ -79,6 +79,8 @@ class PipelineEngine:
             forward_periods=alphalens_cfg.get("forward_periods", [1, 5, 21]),
             quantiles=alphalens_cfg.get("quantiles", 5),
             pass_threshold=alphalens_cfg.get("pass_threshold", {}),
+            use_real=alphalens_cfg.get("use_real", False),
+            output_dir=str(self.outputs / "reports"),
         )
         self._last_alphalens = runner.run(factors, data)
         self._state["alphalens_updated"] = datetime.now().isoformat()
@@ -114,8 +116,9 @@ class PipelineEngine:
         """绩效分析。"""
         pyfolio_cfg = self.config.get("pyfolio", {})
         runner = PyfolioRunner(
-            benchmark=pyfolio_cfg.get("benchmark", "SPY"),
+            benchmark=pyfolio_cfg.get("benchmark"),
             output_dir=str(self.outputs / "reports"),
+            enable_external_reports=pyfolio_cfg.get("enable_external_reports", False),
         )
 
         try:

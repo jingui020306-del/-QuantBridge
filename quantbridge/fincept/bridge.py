@@ -8,6 +8,7 @@ FinceptTerminal 桥接层。
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,7 @@ class FinceptBridge:
         check_available: bool = True,
     ):
         self.integration_mode = integration_mode
-        self.fincept_home = Path(fincept_home) if fincept_home else None
+        self.fincept_home = Path(os.path.expandvars(fincept_home)).expanduser() if fincept_home else None
         self.scripts_dir = self.fincept_home / "fincept-qt" / "scripts" if self.fincept_home else None
         self.available = self._check_available() if check_available else False
 
@@ -89,17 +90,19 @@ class FinceptBridge:
 
     def _format_trades(self, trades: list[dict]) -> list[dict]:
         """将交易记录转为 FinceptTerminal 兼容格式。"""
-        return [
-            {
-                "timestamp": t.get("date", ""),
-                "symbol": t.get("symbol", ""),
-                "side": t.get("type", "").upper(),
-                "quantity": t.get("shares", 0),
-                "price": t.get("price", 0),
-                "value": t.get("cost", t.get("proceeds", 0)),
-            }
-            for t in trades
-        ]
+        formatted = []
+        for trade in trades:
+            side = trade.get("type", "").upper()
+            value = trade.get("proceeds", 0) if side == "SELL" else trade.get("cost", 0)
+            formatted.append({
+                "timestamp": trade.get("date", ""),
+                "symbol": trade.get("symbol", ""),
+                "side": side,
+                "quantity": trade.get("shares", 0),
+                "price": trade.get("price", 0),
+                "value": value,
+            })
+        return formatted
 
     def run_fincept_script(self, script_name: str, args: dict | None = None) -> dict:
         """调用 FinceptTerminal 的 Python 脚本并返回结果。

@@ -1,8 +1,12 @@
 """
-LEAN 预留 + 简易回测降级。
+LEAN 回测集成 — 真 Docker LEAN 执行。
 
-当前会检测 Docker/LEAN 可用性，但完整 LEAN 算法生成和 Docker 执行仍未实现。
-不可用或未实现时使用内置 EMA 交叉回测作为保守降级方案。
+1. 检测 Docker + LEAN 镜像可用性
+2. 将 yfinance 数据转为 LEAN 格式
+3. 生成 LEAN Python 算法代码
+4. Docker 运行回测
+5. 解析输出 JSON（orders + statistics + equity curve）
+不可用时降级到内置简易回测。
 """
 
 import json
@@ -16,8 +20,64 @@ import pandas as pd
 from loguru import logger
 
 
+ALGORITHM_TEMPLATE = '''"""
+QuantBridge auto-generated LEAN algorithm.
+Strategy: {strategy_name}
+Generated: {generated_at}
+"""
+
+from AlgorithmImports import *
+
+
+class QuantBridgeAlgorithm(QCAlgorithm):
+
+    def Initialize(self):
+        self.SetStartDate({start_year}, {start_month}, {start_day})
+        self.SetEndDate({end_year}, {end_month}, {end_day})
+        self.SetCash({cash})
+
+        self._symbols = []
+        self._fast = {fast_period}
+        self._slow = {slow_period}
+        self._ema_fast = {{}}
+        self._ema_slow = {{}}
+        self._position_size_pct = {position_size_pct}
+
+        for ticker in {tickers}:
+            equity = self.AddEquity(ticker, Resolution.{resolution}, Market.USA)
+            equity.SetFeeModel(ConstantFeeModel({commission}))
+            self._symbols.append(equity.Symbol)
+            self._ema_fast[equity.Symbol] = self.EMA(
+                equity.Symbol, self._fast, Resolution.{resolution}
+            )
+            self._ema_slow[equity.Symbol] = self.EMA(
+                equity.Symbol, self._slow, Resolution.{resolution}
+            )
+
+        self.SetWarmUp(max(self._fast, self._slow) + 1)
+
+    def OnData(self, data):
+        for symbol in self._symbols:
+            if not self._ema_fast[symbol].IsReady or not self._ema_slow[symbol].IsReady:
+                continue
+
+            price = data[symbol].Close
+            holdings = self.Portfolio[symbol].Quantity
+
+            if (self._ema_fast[symbol].Current.Value > self._ema_slow[symbol].Current.Value
+                    and self._ema_fast[symbol].Previous.Value <= self._ema_slow[symbol].Previous.Value):
+                if holdings <= 0:
+                    self.SetHoldings(symbol, self._position_size_pct)
+
+            elif (self._ema_fast[symbol].Current.Value < self._ema_slow[symbol].Current.Value
+                    and self._ema_fast[symbol].Previous.Value >= self._ema_slow[symbol].Previous.Value):
+                if holdings > 0:
+                    self.Liquidate(symbol)
+'''
+
+
 class LeanRunner:
-    """LEAN 预留执行器，当前主要提供简易回测降级。"""
+    """LEAN Docker 回测执行器。"""
 
     def __init__(
         self,
@@ -26,184 +86,280 @@ class LeanRunner:
         lean_config: dict | None = None,
     ):
         self.docker_image = docker_image
-        self.data_dir = Path(data_dir)
+        self.data_dir = Path(data_dir).expanduser().resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.config = lean_config or {}
 
     def run(self, alphalens_results: dict, data: dict[str, pd.DataFrame]) -> dict[str, Any]:
-        """执行 LEAN 回测。
-
-        Args:
-            alphalens_results: 因子检验结果（含通过因子列表）
-            data: 标的价格数据
-
-        Returns:
-            {"metrics": {...}, "trades": [...], "equity": [...]}
-        """
         if not alphalens_results.get("passed"):
-            logger.warning("无通过因子，跳过 LEAN")
+            logger.warning("无通过因子，跳过回测")
             return {"metrics": {}, "trades": [], "equity": []}
 
-        # 检查 Docker
-        if not self._docker_available():
-            logger.warning("Docker 不可用，使用内置简易回测代替")
-            return self._run_simple_backtest(alphalens_results, data)
+        if self.config.get("use_docker", False) and self._docker_available() and self._lean_image_available():
+            try:
+                return self._run_lean_docker(alphalens_results, data)
+            except Exception as e:
+                logger.error(f"LEAN Docker 失败，降级: {e}")
 
-        return self._run_lean_docker(alphalens_results, data)
-
-    # ---- Docker LEAN ----
+        logger.warning("LEAN Docker 未启用或不可用，使用内置简易回测")
+        return self._run_simple_backtest(alphalens_results, data)
 
     def _docker_available(self) -> bool:
         try:
-            result = subprocess.run(
-                ["docker", "info"], capture_output=True, text=True, timeout=5
-            )
-            return result.returncode == 0
+            r = subprocess.run(["docker", "info"], capture_output=True, text=True, timeout=5)
+            return r.returncode == 0
         except Exception:
             return False
 
+    def _lean_image_available(self) -> bool:
+        r = subprocess.run(["docker", "images", "-q", self.docker_image], capture_output=True, text=True)
+        return bool(r.stdout.strip())
+
+    # ============================================================
+    # 真 LEAN Docker
+    # ============================================================
+
     def _run_lean_docker(self, alphalens_results: dict, data: dict[str, pd.DataFrame]) -> dict:
-        """Docker 运行 LEAN。具体实现在后续迭代中完成。"""
-        logger.info("LEAN Docker 回测启动...")
+        logger.info("=" * 40)
+        logger.info("LEAN Docker 回测启动")
+        logger.info("=" * 40)
 
-        # 检查镜像
-        result = subprocess.run(
-            ["docker", "images", "-q", self.docker_image],
-            capture_output=True, text=True,
-        )
-        if not result.stdout.strip():
-            logger.warning(f"Docker 镜像 {self.docker_image} 未找到，使用简易回测")
-            logger.info("拉取镜像: docker pull quantconnect/lean")
-            return self._run_simple_backtest(alphalens_results, data)
+        tickers = list(data.keys())
 
-        # TODO(v0.6): 完整 LEAN Docker 集成
-        # 1. 生成 C# 算法文件 → temp dir
-        # 2. docker run -v temp:/Lean/Launcher/bin/Debug \
-        #    quantconnect/lean --data-folder /data \
-        #    --algorithm-location /Lean/Launcher/bin/Debug/algorithm.py
-        # 3. 解析输出 JSON
+        work_parent = self.data_dir.parent / "lean_work"
+        work_parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="quantbridge_lean_", dir=work_parent) as tmp:
+            tmp_path = Path(tmp)
 
-        logger.info("LEAN Docker 集成尚未完整实现，当前使用简易回测")
+            # 1. LEAN 格式数据: Data/equity/usa/daily/{ticker}.csv
+            data_root = tmp_path / "Data"
+            market_dir = tmp_path / "Data" / "equity" / "usa" / "daily"
+            market_dir.mkdir(parents=True, exist_ok=True)
+            for t in tickers:
+                csv = pd.DataFrame({
+                    "Date": data[t].index.strftime("%Y%m%d"),
+                    "Open": data[t]["open"],
+                    "High": data[t]["high"],
+                    "Low": data[t]["low"],
+                    "Close": data[t]["close"],
+                    "Volume": data[t]["volume"].astype(int),
+                })
+                csv.to_csv(market_dir / f"{t.lower()}.csv", index=False)
+                logger.debug(f"LEAN 数据: {t} → {len(csv)} 行")
+
+            # 2. 算法代码
+            algo_path = tmp_path / "algorithm.py"
+            algo_path.write_text(self._gen_algorithm(tickers))
+
+            # 3. results dir
+            results_dir = tmp_path / "results"
+            results_dir.mkdir(exist_ok=True)
+
+            # 4. Docker run
+            cmd = [
+                "docker", "run", "--rm",
+                "-v", f"{data_root}:/Data",
+                "-v", f"{tmp_path}:/Project",
+                "-v", f"{results_dir}:/Results",
+                self.docker_image,
+                "--data-folder", "/Data",
+                "--environment", "backtesting",
+                "--algorithm-type-name", "QuantBridgeAlgorithm",
+                "--algorithm-language", "Python",
+                "--algorithm-location", "/Project/algorithm.py",
+                "--results-destination-folder", "/Results",
+                "--close-automatically", "true",
+            ]
+
+            logger.info(f"LEAN 回测: {len(tickers)} 标的")
+            timeout = int(self.config.get("timeout_seconds", 120))
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+            if result.returncode != 0:
+                tail = result.stderr[-800:] or result.stdout[-800:]
+                logger.error(f"LEAN 退出 {result.returncode}: {tail}")
+                raise RuntimeError(f"LEAN 失败: {tail}")
+
+            logger.info("LEAN Docker 回测完成")
+
+            lean_res = self._parse_lean_results(results_dir)
+            if lean_res and lean_res.get("equity"):
+                return lean_res
+
+        logger.warning("LEAN 结果解析失败，降级")
         return self._run_simple_backtest(alphalens_results, data)
 
-    # ---- 内置简易回测（LEAN 不可用时的降级方案）----
+    def _gen_algorithm(self, tickers: list[str]) -> str:
+        sd = self.config.get("start_date", "2022-01-01")
+        ed = self.config.get("end_date", "2024-12-31")
+        sy, sm, day_s = sd.split("-")
+        ey, em, day_e = ed.split("-")
+        res = self.config.get("resolution", "daily").capitalize()
+        params = self.config.get("strategy_params", {})
+        risk = self.config.get("risk", {})
 
-    def _run_simple_backtest(
-        self, alphalens_results: dict, data: dict[str, pd.DataFrame]
-    ) -> dict:
-        """简易事件驱动回测。
+        return ALGORITHM_TEMPLATE.format(
+            strategy_name=self.config.get("strategy_type", "ema_cross"),
+            generated_at=datetime.now().isoformat(),
+            start_year=sy, start_month=int(sm), start_day=int(day_s),
+            end_year=ey, end_month=int(em), end_day=int(day_e),
+            cash=self.config.get("cash", 100000),
+            fast_period=params.get("fast_period", 9),
+            slow_period=params.get("slow_period", 21),
+            position_size_pct=risk.get("max_position_pct", 0.25),
+            tickers=json.dumps(tickers),
+            resolution=res if res in ("Daily", "Minute") else "Daily",
+            commission=self.config.get("commission", 0.001),
+        )
 
-        在没有 LEAN 时提供基本的回测能力，作为降级方案。
-        """
-        passed_factors = alphalens_results.get("passed_factors", [])
+    def _parse_lean_results(self, results_dir: Path) -> dict | None:
+        orders, equity, equity_dates = [], [], []
+        for f in sorted(results_dir.glob("*.json")):
+            try:
+                c = json.loads(f.read_text())
+                if isinstance(c, dict):
+                    if "Orders" in c:
+                        for oid, o in c["Orders"].items():
+                            orders.append({
+                                "id": str(oid),
+                                "date": o.get("Time", ""),
+                                "symbol": o.get("Symbol", {}).get("Value", ""),
+                                "type": "buy" if o.get("Quantity", 0) > 0 else "sell",
+                                "shares": abs(o.get("Quantity", 0)),
+                                "price": o.get("Price", 0),
+                            })
+                    if "Charts" in c and "Strategy Equity" in c["Charts"]:
+                        vals = c["Charts"]["Strategy Equity"].get("Series", {}).get("Equity", {}).get("Values", [])
+                        equity = [v.get("y", 0) for v in vals]
+                        equity_dates = [v.get("x", "") for v in vals]
+            except Exception:
+                continue
+
+        if not equity:
+            return None
+
+        eq = pd.Series(equity)
+        ret = eq.pct_change().dropna()
+        initial = float(self.config.get("cash", 100000))
+        total_ret = (eq.iloc[-1] - initial) / initial
+        s = float(ret.mean() / ret.std() * (252 ** 0.5)) if ret.std() > 0 else 0
+        peak = eq.expanding().max()
+
+        return {
+            "metrics": {
+                "engine": "LEAN",
+                "total_return": round(total_ret * 100, 2),
+                "sharpe_ratio": round(s, 2),
+                "max_drawdown": round(float(((eq - peak) / peak).min()) * 100, 2),
+                "total_trades": len(orders),
+                "final_equity": round(float(eq.iloc[-1]), 2),
+            },
+            "trades": orders,
+            "equity": [round(float(e), 2) for e in equity],
+            "equity_dates": equity_dates,
+        }
+
+    # ============================================================
+    # 内置简易回测
+    # ============================================================
+
+    def _run_simple_backtest(self, alphalens_results: dict, data: dict[str, pd.DataFrame]) -> dict:
         tickers = list(data.keys())
         if not tickers:
             return {"metrics": {}, "trades": [], "equity": []}
 
-        start_date = self.config.get("start_date", "2022-01-01")
-        end_date = self.config.get("end_date", "2024-12-31")
+        sd = self.config.get("start_date", "2022-01-01")
+        ed = self.config.get("end_date", "2024-12-31")
         cash = float(self.config.get("cash", 100000))
-        commission = float(self.config.get("commission", 0.001))
-        max_position_pct = float(self.config.get("risk", {}).get("max_position_pct", 0.25))
-
-        # 使用第一个标的做单标的回测
-        primary = tickers[0]
-        df = data[primary].loc[start_date:end_date]
-        if df.empty:
-            return {"metrics": {}, "trades": [], "equity": []}
-
-        closes = df["close"].values
-        equity = [cash]
-        trades: list[dict] = []
-        position = 0
-        cash_on_hand = cash
-
-        # 简单 EMA 交叉信号
+        comm = float(self.config.get("commission", 0.001))
+        max_pct = float(self.config.get("risk", {}).get("max_position_pct", 0.25))
         fast = self.config.get("strategy_params", {}).get("fast_period", 9)
         slow = self.config.get("strategy_params", {}).get("slow_period", 21)
 
-        ema_fast = pd.Series(closes).ewm(span=fast, adjust=False).mean().values
-        ema_slow = pd.Series(closes).ewm(span=slow, adjust=False).mean().values
+        primary = tickers[0]
+        df = data[primary].loc[sd:ed]
+        if df.empty:
+            return {"metrics": {}, "trades": [], "equity": []}
 
-        warmup = max(fast, slow) + 1
-        for i in range(warmup, len(closes)):
-            price = closes[i]
+        c = df["close"].values
+        equity = [cash]
+        trades: list[dict] = []
+        pos, bal = 0, cash
 
-            # 信号
-            if ema_fast[i] > ema_slow[i] and ema_fast[i - 1] <= ema_slow[i - 1]:
-                # 金叉买入
-                if position == 0:
-                    max_value = cash_on_hand * max_position_pct
-                    shares = int(max_value / price)
+        ef = pd.Series(c).ewm(span=fast, adjust=False).mean().values
+        es = pd.Series(c).ewm(span=slow, adjust=False).mean().values
+        warm = max(fast, slow) + 1
+        equity_dates = [df.index[min(max(warm - 1, 0), len(df) - 1)]]
+        total_buy_cost = 0.0
+
+        for i in range(warm, len(c)):
+            px = c[i]
+            if ef[i] > es[i] and ef[i - 1] <= es[i - 1]:
+                if pos == 0:
+                    shares = int(bal * max_pct / px)
                     if shares > 0:
-                        cost = shares * price * (1 + commission)
-                        cash_on_hand -= cost
-                        position = shares
-                        trades.append({
-                            "date": str(df.index[i]),
-                            "type": "buy",
-                            "price": float(price),
-                            "shares": shares,
-                            "cost": round(float(cost), 2),
-                        })
+                        cost = shares * px * (1 + comm)
+                        bal -= cost
+                        pos = shares
+                        total_buy_cost = cost
+                        trades.append({"date": str(df.index[i]), "symbol": primary,
+                                       "type": "buy", "price": float(px), "shares": shares,
+                                       "cost": round(float(cost), 2)})
+            elif ef[i] < es[i] and ef[i - 1] >= es[i - 1]:
+                if pos > 0:
+                    proceeds = pos * px * (1 - comm)
+                    pnl = proceeds - total_buy_cost
+                    bal += proceeds
+                    trades.append({"date": str(df.index[i]), "symbol": primary,
+                                   "type": "sell", "price": float(px), "shares": pos,
+                                   "cost": round(float(total_buy_cost), 2),
+                                   "proceeds": round(float(proceeds), 2),
+                                   "pnl": round(float(pnl), 2)})
+                    pos = 0
+                    total_buy_cost = 0.0
+            equity.append(bal + pos * px)
+            equity_dates.append(df.index[i])
 
-            elif ema_fast[i] < ema_slow[i] and ema_fast[i - 1] >= ema_slow[i - 1]:
-                # 死叉卖出
-                if position > 0:
-                    proceeds = position * price * (1 - commission)
-                    cash_on_hand += proceeds
-                    trades.append({
-                        "date": str(df.index[i]),
-                        "type": "sell",
-                        "price": float(price),
-                        "shares": position,
-                        "proceeds": round(float(proceeds), 2),
-                    })
-                    position = 0
+        if pos > 0:
+            proceeds = pos * c[-1] * (1 - comm)
+            pnl = proceeds - total_buy_cost
+            bal += proceeds
+            trades.append({"date": str(df.index[-1]), "symbol": primary,
+                           "type": "sell", "price": float(c[-1]), "shares": pos,
+                           "cost": round(float(total_buy_cost), 2),
+                           "proceeds": round(float(proceeds), 2),
+                           "pnl": round(float(pnl), 2),
+                           "exit_reason": "final_liquidation"})
+            equity[-1] = bal
 
-            total_value = cash_on_hand + position * price
-            equity.append(total_value)
-
-        # 清仓
-        if position > 0:
-            final_price = closes[-1]
-            cash_on_hand += position * final_price * (1 - commission)
-            equity[-1] = cash_on_hand
-
-        return self._compute_metrics(equity, trades, cash)
-
-    def _compute_metrics(self, equity: list[float], trades: list[dict], initial_cash: float) -> dict:
-        """计算回测指标。"""
         eq = pd.Series(equity)
-        returns = eq.pct_change().dropna()
+        ret = eq.pct_change().dropna()
+        if len(ret) < 2:
+            return {
+                "metrics": {},
+                "trades": trades,
+                "equity": equity,
+                "equity_dates": [str(d) for d in equity_dates],
+            }
 
-        if len(returns) < 2:
-            return {"metrics": {}, "trades": trades, "equity": equity}
-
-        # 基础指标
-        total_return = (eq.iloc[-1] - initial_cash) / initial_cash
-        sharpe = float(
-            returns.mean() / returns.std() * (252 ** 0.5)
-        ) if returns.std() > 0 else 0
-
-        # 最大回撤
+        tr = float((eq.iloc[-1] - cash) / cash)
+        sp = float(ret.mean() / ret.std() * (252 ** 0.5)) if ret.std() > 0 else 0
         peak = eq.expanding().max()
-        drawdown = (eq - peak) / peak
-        max_dd = float(drawdown.min())
-
-        # 胜率
-        winning = [t for t in trades if t["type"] == "sell" and t.get("proceeds", 0) > 0]
-        win_rate = len(winning) / len([t for t in trades if t["type"] == "sell"]) if trades else 0
+        dd = float(((eq - peak) / peak).min())
+        sells = [t for t in trades if t["type"] == "sell"]
+        wins = [s for s in sells if s.get("pnl", 0) > 0]
 
         return {
             "metrics": {
-                "total_return": round(total_return * 100, 2),
-                "sharpe_ratio": round(sharpe, 2),
-                "max_drawdown": round(max_dd * 100, 2),
+                "engine": "QuantBridge-lite",
+                "total_return": round(float(tr * 100), 2),
+                "sharpe_ratio": round(sp, 2),
+                "max_drawdown": round(dd * 100, 2),
                 "total_trades": len(trades),
-                "win_rate": round(win_rate * 100, 1),
+                "win_rate": round(len(wins) / len(sells) * 100, 1) if sells else 0,
                 "final_equity": round(float(eq.iloc[-1]), 2),
             },
             "trades": trades,
             "equity": [round(float(e), 2) for e in equity],
+            "equity_dates": [str(d) for d in equity_dates],
         }

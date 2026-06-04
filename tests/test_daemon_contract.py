@@ -1,4 +1,4 @@
-from quantbridge.daemon import QuantBridgeDaemon
+from quantbridge.daemon import QuantBridgeDaemon, StrategyChangeHandler
 
 
 def test_daemon_only_accepts_explicit_trigger_files():
@@ -18,3 +18,23 @@ def test_daemon_heartbeat_lives_outside_watch_dir():
 
     assert daemon.watch_dir == daemon.runtime_dir.parent / "watch"
     assert daemon.runtime_dir == daemon.watch_dir.parent / "runtime"
+
+
+def test_strategy_change_handler_suppresses_cooldown_noise():
+    class FakeDaemon:
+        def __init__(self):
+            self.runs = 0
+
+        def run_cycle(self):
+            self.runs += 1
+
+    fake = FakeDaemon()
+    handler = StrategyChangeHandler(fake)
+
+    assert handler._trigger_if_cooled("first event")
+    assert not handler._trigger_if_cooled("duplicate event")
+    assert fake.runs == 1
+
+    handler._last_run -= handler._cooldown + 0.1
+    assert handler._trigger_if_cooled("later edit")
+    assert fake.runs == 2

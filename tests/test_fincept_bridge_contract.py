@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from quantbridge.fincept.bridge import FinceptBridge
 
@@ -33,6 +34,38 @@ def test_bridge_formats_signal_contract_and_trade_shape():
         "quantity": 10,
         "price": 100,
         "value": 1001,
+    }]
+
+
+def test_bridge_expands_user_home_in_fincept_path():
+    bridge = FinceptBridge(fincept_home="~/FinceptTerminal", check_available=False)
+
+    assert bridge.fincept_home == Path.home() / "FinceptTerminal"
+
+
+def test_bridge_uses_sell_proceeds_as_transaction_value():
+    bridge = FinceptBridge(integration_mode="file")
+
+    payload = bridge.format_signals({
+        "trades": [{
+            "date": "2026-06-04",
+            "symbol": "AAPL",
+            "type": "sell",
+            "shares": 10,
+            "price": 110,
+            "cost": 1000,
+            "proceeds": 1099,
+            "pnl": 99,
+        }],
+    })
+
+    assert payload["trades"] == [{
+        "timestamp": "2026-06-04",
+        "symbol": "AAPL",
+        "side": "SELL",
+        "quantity": 10,
+        "price": 110,
+        "value": 1099,
     }]
 
 
