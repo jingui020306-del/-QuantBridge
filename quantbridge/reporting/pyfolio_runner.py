@@ -1,7 +1,7 @@
 """
-pyfolio 绩效分析集成。
+pyfolio-style 绩效摘要。
 
-对 LEAN 回测结果做深度分析：
+当前对回测结果做内置绩效摘要，尚未调用 pyfolio-reloaded 生成 tear sheet：
   - 收益分析（年化、月度分布、滚动夏普）
   - 风险分析（回撤、VaR、尾部风险）
   - 交易分析（胜率、盈亏比）
@@ -17,7 +17,7 @@ from loguru import logger
 
 
 class PyfolioRunner:
-    """绩效分析执行器。"""
+    """pyfolio-style 绩效摘要执行器。"""
 
     def __init__(
         self,

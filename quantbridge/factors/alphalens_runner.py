@@ -1,7 +1,7 @@
 """
-alphalens 因子检验集成。
+因子检验 lite。
 
-对计算出的因子做完整的 IC 分析、分层回测，判定因子是否值得进入 LEAN 回测。
+当前使用内置 IC 和简易分层检验来筛选因子；完整 alphalens API 集成仍是后续工作。
 """
 
 import warnings
@@ -22,7 +22,7 @@ except ImportError:
 
 
 class AlphalensRunner:
-    """因子检验执行器。"""
+    """因子检验执行器（lite 模式）。"""
 
     def __init__(
         self,

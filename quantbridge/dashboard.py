@@ -10,6 +10,7 @@ QuantBridge Dashboard — Streamlit 实时仪表盘。
 """
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -23,7 +24,7 @@ st.set_page_config(
 )
 
 st.title("📊 QuantBridge Dashboard")
-st.caption("FinceptTerminal + alphalens + LEAN + pyfolio — 自动化量化管线")
+st.caption("文件桥接 + 因子检验 lite + 回测降级 + 绩效摘要")
 
 # ---- 侧边栏 ----
 
@@ -33,13 +34,14 @@ with st.sidebar:
     # 配置路径
     config_path = st.text_input("配置文件", "config/default.yaml")
     watch_dir = st.text_input("监听目录", "outputs/watch")
+    runtime_dir = st.text_input("运行状态目录", "outputs/runtime")
 
     st.divider()
 
     # 状态概览
     st.header("管线状态")
 
-    heartbeat_path = Path(watch_dir) / "heartbeat.json"
+    heartbeat_path = Path(runtime_dir) / "heartbeat.json"
     if heartbeat_path.exists():
         hb = json.loads(heartbeat_path.read_text())
         st.success(f"运行中 — 上次回环: {hb.get('last_cycle', 'N/A')}")
@@ -50,7 +52,7 @@ with st.sidebar:
 
     # 手动触发
     if st.button("🔄 手动触发回环", use_container_width=True):
-        trigger = {"event": "manual", "timestamp": ""}
+        trigger = {"event": "manual", "timestamp": datetime.now().isoformat()}
         (Path(watch_dir) / "trigger_manual.json").write_text(
             json.dumps(trigger, indent=2)
         )
@@ -174,7 +176,7 @@ with tab4:
 st.divider()
 st.caption(
     f"QuantBridge v0.1.0 | "
-    f"FinceptTerminal bridge | "
-    f"alphalens → LEAN → pyfolio | "
+    f"file bridge | "
+    f"factor-lite → backtest fallback → performance summary | "
     f"Dashboard refresh: {Path(watch_dir)}"
 )

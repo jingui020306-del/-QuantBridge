@@ -1,7 +1,8 @@
-"""QuantBridge — Quantitative strategy pipeline.
+"""QuantBridge — lightweight quantitative research orchestrator.
 
-Automatically bridges FinceptTerminal research with alphalens factor validation,
-LEAN backtesting, and pyfolio performance analysis.
+Current integrations are conservative file contracts plus built-in lite analysis
+and fallback backtesting. Full FinceptTerminal, alphalens, LEAN, and pyfolio
+native integrations remain explicit future work.
 """
 
 __version__ = "0.1.0"

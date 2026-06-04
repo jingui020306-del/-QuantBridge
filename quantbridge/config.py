@@ -23,7 +23,8 @@ def ensure_output_dirs(config: dict) -> None:
         config.get("data", {}).get("cache_dir", "outputs/cache"),
         config.get("backtest", {}).get("lean", {}).get("data_dir", "outputs/lean_data"),
         config.get("fincept", {}).get("report_output", "outputs/reports"),
-        "outputs/watch",
+        config.get("daemon", {}).get("watch_dir", "outputs/watch"),
+        config.get("daemon", {}).get("runtime_dir", "outputs/runtime"),
     ]
     for d in dirs:
         Path(d).mkdir(parents=True, exist_ok=True)

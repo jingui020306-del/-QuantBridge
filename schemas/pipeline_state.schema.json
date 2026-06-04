@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "QuantBridge Pipeline State",
+  "type": "object",
+  "properties": {
+    "data_updated": {"type": "string"},
+    "factors_updated": {"type": "string"},
+    "alphalens_updated": {"type": "string"},
+    "lean_updated": {"type": "string"},
+    "pyfolio_updated": {"type": "string"}
+  },
+  "additionalProperties": true
+}

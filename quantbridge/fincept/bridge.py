@@ -3,8 +3,8 @@ FinceptTerminal 桥接层。
 
 职责：
   1. 复用 FinceptTerminal 的 Python 脚本（技术指标、数据源）
-  2. 将 QuantBridge 产出写回 FinceptTerminal 可读取的格式
-  3. 双向通信：FinceptTerminal ↔ QuantBridge daemon
+  2. 将 QuantBridge 产出写为稳定 JSON 文件契约
+  3. 为后续 FinceptTerminal 原生桥接保留触发文件入口
 """
 
 import json
@@ -16,12 +16,21 @@ from loguru import logger
 
 
 class FinceptBridge:
-    """FinceptTerminal 双向桥接。"""
+    """FinceptTerminal 文件桥接预留。
 
-    def __init__(self, fincept_home: str | None = None):
+    当前支持的是 file 模式：QuantBridge 写文件，FinceptTerminal 本体尚不原生消费。
+    """
+
+    def __init__(
+        self,
+        fincept_home: str | None = None,
+        integration_mode: str = "file",
+        check_available: bool = True,
+    ):
+        self.integration_mode = integration_mode
         self.fincept_home = Path(fincept_home) if fincept_home else None
         self.scripts_dir = self.fincept_home / "fincept-qt" / "scripts" if self.fincept_home else None
-        self.available = self._check_available()
+        self.available = self._check_available() if check_available else False
 
     def _check_available(self) -> bool:
         """检测 FinceptTerminal 是否可用。"""
@@ -52,24 +61,31 @@ class FinceptBridge:
                     scripts.extend(d.glob("*.py"))
         return scripts
 
-    def write_signals(self, signals: dict, output_path: str = "outputs/signals.json") -> None:
-        """将 QuantBridge 产出的信号写为 FinceptTerminal 可读格式。
-
-        FinceptTerminal 的 strategy/algo 模块能读取这个 JSON。
-        """
-        output = Path(output_path)
-        output.parent.mkdir(parents=True, exist_ok=True)
-
-        payload = {
+    def format_signals(self, signals: dict) -> dict:
+        """将 QuantBridge 内部信号标准化为文件契约 payload。"""
+        return {
             "source": "QuantBridge",
+            "integration_mode": self.integration_mode,
             "generated_at": signals.get("generated_at", ""),
+            "passed": signals.get("passed", False),
+            "passed_factors": signals.get("passed_factors", []),
             "factors": signals.get("factors", {}),
             "trades": self._format_trades(signals.get("trades", [])),
             "metrics": signals.get("metrics", {}),
         }
 
+    def write_signals(self, signals: dict, output_path: str = "outputs/signals.json") -> dict:
+        """将 QuantBridge 产出的信号写为当前 file 模式契约。
+
+        注意：FinceptTerminal 本体目前没有原生消费该文件，需要额外桥接入口。
+        """
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        payload = self.format_signals(signals)
         output.write_text(json.dumps(payload, indent=2, default=str))
-        logger.info(f"信号已写回 FinceptTerminal: {output}")
+        logger.info(f"信号快照已输出: {output}")
+        return payload
 
     def _format_trades(self, trades: list[dict]) -> list[dict]:
         """将交易记录转为 FinceptTerminal 兼容格式。"""
@@ -136,6 +152,10 @@ class FinceptBridge:
         logger.info(f"触发已写入: {trigger_file}")
 
 
-def get_bridge(fincept_home: str | None = None) -> FinceptBridge:
+def get_bridge(
+    fincept_home: str | None = None,
+    integration_mode: str = "file",
+    check_available: bool = True,
+) -> FinceptBridge:
     """工厂函数：获取 FinceptBridge 实例。"""
-    return FinceptBridge(fincept_home)
+    return FinceptBridge(fincept_home, integration_mode, check_available)

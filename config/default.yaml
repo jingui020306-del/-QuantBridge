@@ -8,6 +8,20 @@ general:
   output_dir: "outputs"
   log_level: "INFO"
 
+daemon:
+  watch_dir: "outputs/watch"
+  runtime_dir: "outputs/runtime"
+  poll_interval_seconds: 300
+  # 只监听显式触发文件，避免 heartbeat/state/signals 输出造成自触发。
+  trigger_patterns:
+    - "trigger_*.json"
+    - "strategy_*.json"
+    - "strategy_*.yaml"
+    - "strategy_*.yml"
+    - "params_*.json"
+    - "params_*.yaml"
+    - "params_*.yml"
+
 data:
   tickers:
     - AAPL
@@ -25,7 +39,7 @@ data:
   fincept_export_path: null
 
 factors:
-  # FinceptTerminal 脚本目录（复用其技术指标计算）
+  # FinceptTerminal 脚本目录（预留集成点；当前默认因子由 QuantBridge 内置计算）
   fincept_scripts_dir: "/tmp/FinceptTerminal/fincept-qt/scripts"
   # 自定义因子列表（为空则用默认技术指标组合）
   custom_factors: []
@@ -50,7 +64,7 @@ alphalens:
     min_quantile_spread: 0.005  # 顶底层日均收益差 > 0.5bp
 
 backtest:
-  engine: "lean"                # lean（后续可扩展 vectorbt）
+  engine: "lean"                # 当前 lean 模式会在 Docker 集成不可用时降级为简易回测
   lean:
     docker_image: "quantconnect/lean:latest"
     # 数据目录挂载
@@ -79,15 +93,18 @@ pyfolio:
 
 fincept:
   enabled: true
+  # 当前仅支持 file：QuantBridge 写 signals.json / trigger 文件。
+  # native 需要在 FinceptTerminal 本体增加读取 signals / 写 trigger 的入口后再启用。
+  integration_mode: "file"
   # FinceptTerminal 安装路径
   fincept_home: "/tmp/FinceptTerminal"
   # 启动时自动执行的任务
   on_launch:
     - refresh_data
     - compute_factors
-  # 输出给 FinceptTerminal 的信号文件
+  # QuantBridge 信号快照；FinceptTerminal 原生读取需要额外桥接
   signal_output: "outputs/signals.json"
-  # 输出给 FinceptTerminal 的报告
+  # QuantBridge 报告目录
   report_output: "outputs/reports"
 
 dashboard:

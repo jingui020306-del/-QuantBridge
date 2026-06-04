@@ -2,7 +2,7 @@
 
 支持：
   - 内置技术因子（RSI、MACD、动量、波动率等）
-  - 调用 FinceptTerminal 技术指标脚本（避免重复造轮子）
+  - 预留 FinceptTerminal 技术指标脚本目录作为后续集成点
   - 自定义因子表达式
 """
 

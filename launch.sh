@@ -112,7 +112,22 @@ echo -e "${GREEN}  打开 http://localhost:8501${NC}"
 sleep 1
 
 # 5. 启动 FinceptTerminal（前台）
-FINCEPT_EXEC="$FINCEPT_HOME/build/fincept"
+if [ -z "${FINCEPT_EXEC:-}" ]; then
+    FINCEPT_CANDIDATES=(
+        "$FINCEPT_HOME/build/fincept"
+        "$FINCEPT_HOME/build/macos-release/FinceptTerminal"
+        "$FINCEPT_HOME/build/macos-debug/FinceptTerminal"
+        "$FINCEPT_HOME/fincept-qt/build/macos-release/FinceptTerminal"
+        "$FINCEPT_HOME/fincept-qt/build/macos-debug/FinceptTerminal"
+    )
+    for candidate in "${FINCEPT_CANDIDATES[@]}"; do
+        if [ -x "$candidate" ]; then
+            FINCEPT_EXEC="$candidate"
+            break
+        fi
+    done
+fi
+
 if [ -x "$FINCEPT_EXEC" ]; then
     echo -e "${YELLOW}启动 FinceptTerminal...${NC}"
     echo ""

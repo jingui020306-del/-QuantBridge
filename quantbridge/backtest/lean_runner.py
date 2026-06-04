@@ -1,10 +1,8 @@
 """
-LEAN 回测集成。
+LEAN 预留 + 简易回测降级。
 
-职责：
-  1. 将 Python 侧的策略/因子翻译为 LEAN C# 算法代码
-  2. 通过 Docker 拉起 LEAN 容器执行回测
-  3. 捕获并解析回测结果（净值、交易记录）
+当前会检测 Docker/LEAN 可用性，但完整 LEAN 算法生成和 Docker 执行仍未实现。
+不可用或未实现时使用内置 EMA 交叉回测作为保守降级方案。
 """
 
 import json
@@ -19,7 +17,7 @@ from loguru import logger
 
 
 class LeanRunner:
-    """LEAN 回测执行器（Docker 模式）。"""
+    """LEAN 预留执行器，当前主要提供简易回测降级。"""
 
     def __init__(
         self,
@@ -78,14 +76,14 @@ class LeanRunner:
             logger.info("拉取镜像: docker pull quantconnect/lean")
             return self._run_simple_backtest(alphalens_results, data)
 
-        # TODO(v0.3): 完整 LEAN Docker 集成
+        # TODO(v0.6): 完整 LEAN Docker 集成
         # 1. 生成 C# 算法文件 → temp dir
         # 2. docker run -v temp:/Lean/Launcher/bin/Debug \
         #    quantconnect/lean --data-folder /data \
         #    --algorithm-location /Lean/Launcher/bin/Debug/algorithm.py
         # 3. 解析输出 JSON
 
-        logger.info("LEAN Docker 集成将在 v0.3 完整实现，当前使用简易回测")
+        logger.info("LEAN Docker 集成尚未完整实现，当前使用简易回测")
         return self._run_simple_backtest(alphalens_results, data)
 
     # ---- 内置简易回测（LEAN 不可用时的降级方案）----

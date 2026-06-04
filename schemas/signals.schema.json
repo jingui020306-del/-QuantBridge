@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "QuantBridge Signals Snapshot",
+  "type": "object",
+  "required": [
+    "source",
+    "integration_mode",
+    "generated_at",
+    "passed",
+    "passed_factors",
+    "factors",
+    "trades",
+    "metrics"
+  ],
+  "properties": {
+    "source": {"type": "string"},
+    "integration_mode": {
+      "type": "string",
+      "enum": ["file", "native"]
+    },
+    "generated_at": {"type": "string"},
+    "passed": {"type": "boolean"},
+    "passed_factors": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "factors": {"type": "object"},
+    "trades": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "metrics": {"type": "object"}
+  },
+  "additionalProperties": true
+}

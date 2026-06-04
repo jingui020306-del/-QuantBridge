@@ -8,7 +8,6 @@
   - 统一输出格式
 """
 
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -113,7 +112,7 @@ class DataFetcher:
         )
 
     def _read_cache(self, ticker: str) -> Optional[pd.DataFrame]:
-        cache_path = self.cache_dir / f"{ticker}_{self.frequency}.parquet"
+        cache_path = self._cache_path(ticker)
         if cache_path.exists():
             df = pd.read_parquet(cache_path)
             # 过滤日期范围
@@ -123,8 +122,14 @@ class DataFetcher:
 
     def _write_cache(self, ticker: str, df: pd.DataFrame) -> None:
         if self.cache_dir:
-            cache_path = self.cache_dir / f"{ticker}_{self.frequency}.parquet"
+            cache_path = self._cache_path(ticker)
             df.to_parquet(cache_path)
+
+    def _cache_path(self, ticker: str) -> Path:
+        safe_ticker = ticker.replace("/", "-").replace(":", "-")
+        safe_start = self.start_date.replace("/", "-")
+        safe_end = self.end_date.replace("/", "-")
+        return self.cache_dir / f"{safe_ticker}_{self.frequency}_{safe_start}_{safe_end}.parquet"
 
     def _read_fincept_export(self, ticker: str) -> Optional[pd.DataFrame]:
         """从 FinceptTerminal 导出的 CSV 读取数据。"""

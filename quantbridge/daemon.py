@@ -2,17 +2,18 @@
 QuantBridge Daemon — 后台常驻服务。
 
 职责：
-  1. 监听 watch/ 目录，FinceptTerminal 写入策略变更即触发 pipeline
+  1. 监听 watch/ 目录中的显式触发文件
   2. 定时轮询（兜底机制）
-  3. 执行完整 pipeline：数据 → 因子 → alphalens → LEAN → pyfolio
-  4. 结果写回 outputs/，FinceptTerminal 自动读取
+  3. 执行 pipeline：数据 → 因子 → 因子检验 → 回测 → 绩效摘要
+  4. 结果写回 outputs/，供 Dashboard 和外部桥接读取
   5. 自动回环
 """
 
 import json
-import os
+import threading
 import time
 from datetime import datetime
+from fnmatch import fnmatch
 from pathlib import Path
 
 from loguru import logger
@@ -32,12 +33,12 @@ class StrategyChangeHandler(FileSystemEventHandler):
         self._cooldown = 5  # 冷却秒数，避免频繁触发
 
     def on_created(self, event):
-        if not event.is_directory and event.src_path.endswith((".json", ".yaml", ".yml")):
+        if not event.is_directory and self.daemon.is_trigger_file(event.src_path):
             logger.info(f"检测到策略变更: {event.src_path}")
             self._trigger_if_cooled()
 
     def on_modified(self, event):
-        if not event.is_directory and event.src_path.endswith((".json", ".yaml", ".yml")):
+        if not event.is_directory and self.daemon.is_trigger_file(event.src_path):
             logger.info(f"检测到策略更新: {event.src_path}")
             self._trigger_if_cooled()
 
@@ -55,14 +56,27 @@ class QuantBridgeDaemon:
         self.config = load_config(config_path)
         ensure_output_dirs(self.config)
 
-        self.watch_dir = Path("outputs/watch")
+        daemon_cfg = self.config.get("daemon", {})
+        self.watch_dir = Path(daemon_cfg.get("watch_dir", "outputs/watch"))
         self.watch_dir.mkdir(parents=True, exist_ok=True)
+        self.runtime_dir = Path(daemon_cfg.get("runtime_dir", "outputs/runtime"))
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        self.trigger_patterns = daemon_cfg.get("trigger_patterns", [
+            "trigger_*.json",
+            "strategy_*.json",
+            "strategy_*.yaml",
+            "strategy_*.yml",
+            "params_*.json",
+            "params_*.yaml",
+            "params_*.yml",
+        ])
 
         self.engine = PipelineEngine(self.config)
         self.observer: Observer | None = None
+        self._cycle_lock = threading.Lock()
 
         # 轮询间隔（秒）
-        self._poll_interval = self.config.get("daemon", {}).get("poll_interval_seconds", 300)
+        self._poll_interval = daemon_cfg.get("poll_interval_seconds", 300)
 
         logger.info("QuantBridge Daemon 初始化完成")
 
@@ -71,6 +85,8 @@ class QuantBridgeDaemon:
         logger.info("=" * 50)
         logger.info("QuantBridge Daemon 启动")
         logger.info(f"  监听目录: {self.watch_dir}")
+        logger.info(f"  运行状态目录: {self.runtime_dir}")
+        logger.info(f"  触发模式: {', '.join(self.trigger_patterns)}")
         logger.info(f"  轮询间隔: {self._poll_interval}s")
         logger.info("=" * 50)
 
@@ -108,10 +124,21 @@ class QuantBridgeDaemon:
             self.observer.join()
         logger.info("QuantBridge Daemon 已停止")
 
+    def is_trigger_file(self, path: str | Path) -> bool:
+        """只接受显式触发文件，避免 heartbeat/state 输出反向触发回环。"""
+        name = Path(path).name
+        return any(fnmatch(name, pattern) for pattern in self.trigger_patterns)
+
     def run_cycle(self):
         """执行一次完整回环。"""
+        if not self._cycle_lock.acquire(blocking=False):
+            logger.warning("已有回环正在执行，跳过本次触发")
+            return
+
         cycle_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         logger.info(f"\n{'#' * 40}\n  回环开始: {cycle_id}\n{'#' * 40}")
+        status = "ok"
+        error = None
 
         try:
             # 1. 拉取/更新数据
@@ -139,16 +166,20 @@ class QuantBridgeDaemon:
 
             logger.info(f"回环完成: {cycle_id}")
 
-        except Exception:
+        except Exception as exc:
+            status = "error"
+            error = str(exc)
             logger.exception(f"回环失败: {cycle_id}")
-
-        # 写心跳文件
-        heartbeat = {
-            "last_cycle": cycle_id,
-            "status": "ok",
-            "timestamp": datetime.now().isoformat(),
-        }
-        (self.watch_dir / "heartbeat.json").write_text(json.dumps(heartbeat, indent=2))
+        finally:
+            heartbeat = {
+                "last_cycle": cycle_id,
+                "status": status,
+                "timestamp": datetime.now().isoformat(),
+            }
+            if error:
+                heartbeat["error"] = error
+            (self.runtime_dir / "heartbeat.json").write_text(json.dumps(heartbeat, indent=2))
+            self._cycle_lock.release()
 
 
 def main():

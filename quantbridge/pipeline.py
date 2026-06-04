@@ -16,6 +16,7 @@ from .data.fetcher import DataFetcher
 from .factors.alphalens_runner import AlphalensRunner
 from .factors.engine import FactorEngine
 from .backtest.lean_runner import LeanRunner
+from .fincept.bridge import FinceptBridge
 from .reporting.pyfolio_runner import PyfolioRunner
 
 
@@ -109,7 +110,7 @@ class PipelineEngine:
 
     # ---- 步骤 5: pyfolio ----
 
-    def run_pyfolio(self, lean_results: dict) -> None:
+    def run_pyfolio(self, lean_results: dict) -> dict:
         """绩效分析。"""
         pyfolio_cfg = self.config.get("pyfolio", {})
         runner = PyfolioRunner(
@@ -118,33 +119,40 @@ class PipelineEngine:
         )
 
         try:
-            runner.run(lean_results)
+            report = runner.run(lean_results)
             self._state["pyfolio_updated"] = datetime.now().isoformat()
+            return report
         except Exception as e:
             logger.error(f"pyfolio 分析失败: {e}")
+            return {}
 
     # ---- 步骤 6: 写回信号 ----
 
     def write_signals(self, alphalens_results: dict, lean_results: dict | None) -> None:
-        """将信号写回 outputs/，供 FinceptTerminal 读取。"""
-        fincept_cfg = self.config.get("fincept", {})
-        if not fincept_cfg.get("enabled", True):
-            return
+        """将稳定信号快照写入 outputs/。
 
+        当前这是 QuantBridge 自己的文件契约；FinceptTerminal 本体尚未原生消费该文件。
+        """
+        fincept_cfg = self.config.get("fincept", {})
         signal_output = Path(fincept_cfg.get("signal_output", "outputs/signals.json"))
+        bridge = FinceptBridge(
+            fincept_home=fincept_cfg.get("fincept_home"),
+            integration_mode=fincept_cfg.get("integration_mode", "file"),
+            check_available=False,
+        )
 
         signals = {
             "generated_at": datetime.now().isoformat(),
+            "passed": bool(alphalens_results.get("passed", False)),
+            "passed_factors": alphalens_results.get("passed_factors", []),
             "factors": alphalens_results.get("summary", {}),
             "trades": lean_results.get("trades", []) if lean_results else [],
             "metrics": lean_results.get("metrics", {}) if lean_results else {},
         }
 
-        signal_output.parent.mkdir(parents=True, exist_ok=True)
-        signal_output.write_text(json.dumps(signals, indent=2, default=str))
-        logger.info(f"信号已输出: {signal_output}")
+        if fincept_cfg.get("enabled", True):
+            bridge.write_signals(signals, str(signal_output))
 
-        # 同时写 state 快照
         state_path = self.outputs / "pipeline_state.json"
         state_path.write_text(json.dumps(self._state, indent=2, default=str))
 
@@ -182,10 +190,15 @@ def main():
 
     alphalens = engine.run_alphalens(factors, data)
     if stage == "alphalens":
+        engine.write_signals(alphalens, None)
         return
 
     lean = engine.run_lean(alphalens, data) if alphalens.get("passed") else None
-    if stage == "lean" or not lean:
+    if stage == "lean":
+        engine.write_signals(alphalens, lean)
+        return
+    if not lean:
+        engine.write_signals(alphalens, None)
         return
 
     engine.run_pyfolio(lean)
